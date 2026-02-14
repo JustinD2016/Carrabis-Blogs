@@ -119,6 +119,7 @@ st.markdown("""
     }
     .full-post .body img { max-width: 100%; height: auto; border-radius: 6px; margin: 10px 0; }
     .full-post .body img[src=""], .full-post .body img:not([src]) { display: none; }
+    .full-post .body img.broken { display: none !important; }
     .full-post .body iframe { max-width: 100%; margin: 10px 0; }
     .full-post .body p { margin-bottom: 1em; }
     .full-post .body p:empty { display: none; }
@@ -301,23 +302,29 @@ def get_display_html(post):
 
 
 def strip_dead_media(html_content):
-    """Remove img/iframe/embed tags pointing to dead or irrelevant domains."""
+    """Remove img/iframe/embed tags pointing to dead or irrelevant domains,
+    and add onerror handlers to remaining images to hide if they fail to load."""
     if not html_content:
         return html_content
 
-    # Dead image/media domains
+    # Dead image/media domains — only truly dead sources
     dead_patterns = [
-        r'<img[^>]+src="[^"]*barstoolsports\.com[^"]*"[^>]*/?>',
-        r'<img[^>]+src="[^"]*cloudfront\.net[^"]*"[^>]*/?>',
-        r'<img[^>]+src="[^"]*wp-content[^"]*"[^>]*/?>',
-        r'<img[^>]+src="[^"]*\.bss\.io[^"]*"[^>]*/?>',
         r'<img[^>]+src="[^"]*chumley[^"]*"[^>]*/?>',
+        r'<img[^>]+src="[^"]*\.bss\.io[^"]*"[^>]*/?>',
         r'<iframe[^>]+src="[^"]*vine\.co[^"]*"[^>]*></iframe>',
         r'<embed[^>]+src="[^"]*"[^>]*/?>',
     ]
 
     for pattern in dead_patterns:
         html_content = re.sub(pattern, '', html_content, flags=re.IGNORECASE)
+
+    # Add onerror to all remaining images so broken ones hide themselves
+    html_content = re.sub(
+        r'<img(?![^>]*onerror)',
+        '<img onerror="this.style.display=\'none\'"',
+        html_content,
+        flags=re.IGNORECASE
+    )
 
     # Remove empty paragraphs left behind
     html_content = re.sub(r'<p>\s*</p>', '', html_content)
