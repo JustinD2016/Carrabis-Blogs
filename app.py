@@ -225,8 +225,8 @@ def clean_body_text(text):
 
     # Patterns that indicate end of article content
     cut_patterns = [
-        r'Follow\s+@\w+\s+Share\s+Tweet',
-        r'Share\s+Tweet\s+React\s*\(\d+\)',
+        r'\s+Share\s+Tweet\s+React\s*\(\d+\)',
+        r'\s+Share\s+Tweet\s*$',
         r'Top \d+ Comments',
         r'\d+ comments?\s+Sort by',
         r'Comments will close out',
@@ -246,7 +246,6 @@ def clean_body_text(text):
     for pattern in cut_patterns:
         match = re.search(pattern, text)
         if match:
-            # Cut everything from this point
             text = text[:match.start()].rstrip()
             break
 
