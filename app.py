@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup, Comment
 # CONFIG
 # ============================================================================
 
-DB_PATH = Path("carrabis_archive") / "carrabis_blogs_deploy.db"
+DB_PATH = Path("carrabis_archive") / "carrabis_blogs.db"
 
 st.set_page_config(
     page_title="Carrabis Blog Archive",
@@ -216,8 +216,26 @@ def sanitize_html(raw_html):
 
 
 def get_display_html(post):
-    """Get displayable HTML for a post from body_text."""
+    """Get displayable HTML for a post."""
+    body_html = post.get("body_html") or ""
+    era = post.get("era") or ""
+
+    # nextjs_v2 body_html is already clean from __NEXT_DATA__
+    if era == "nextjs_v2" and body_html:
+        return body_html
+
+    # Other eras need sanitizing
+    if body_html:
+        try:
+            cleaned = sanitize_html(body_html)
+            if cleaned:
+                return cleaned
+        except Exception:
+            pass
+
+    # Fallback: body_text to paragraphs
     body_text = post.get("body_text") or "No content available."
+    # Try double newlines first, then single
     paragraphs = body_text.split('\n\n')
     if len(paragraphs) <= 1:
         paragraphs = body_text.split('\n')
@@ -378,7 +396,7 @@ def search_posts(title_query="", body_query="", confidence="all",
 def get_post(post_id):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, title, author, date_published, body_text, "
+        "SELECT id, title, author, date_published, body_html, body_text, "
         "wayback_url, original_url, confidence, match_strategy, era "
         "FROM posts WHERE id = ?",
         (post_id,),
