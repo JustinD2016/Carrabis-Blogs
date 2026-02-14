@@ -215,6 +215,58 @@ def sanitize_html(raw_html):
     return result if len(result) > 50 else ""
 
 
+def clean_body_text(text):
+    """
+    Strip comments, sidebar tweets, footer junk from body_text.
+    Old wordpress-era posts have all of this baked into the text.
+    """
+    if not text:
+        return text
+
+    # Patterns that indicate end of article content
+    cut_patterns = [
+        r'Follow\s+@\w+\s+Share\s+Tweet',
+        r'Share\s+Tweet\s+React\s*\(\d+\)',
+        r'Top \d+ Comments',
+        r'\d+ comments?\s+Sort by',
+        r'Comments will close out',
+        r'Thumbs Up\s+Thumbs Down\s+by\s+',
+        r'Up:\s*\d+\s*Down:\s*\d+',
+        r'Leave a Comment',
+        r'Tweets\s+.*?http://t\.co/',
+        r'Tour Dates\s+',
+        r'Featured Video\s+',
+        r'View more Videos',
+        r'Â©\s*\d{4}\s*Barstool',
+        r'Disclaimer\s*\|\s*Copyright',
+        r'Media Kit\s*$',
+        r'Barstool Sports\s*\|\s*Disclaimer',
+    ]
+
+    for pattern in cut_patterns:
+        match = re.search(pattern, text)
+        if match:
+            # Cut everything from this point
+            text = text[:match.start()].rstrip()
+            break
+
+    # Also strip "By carrabis posted November 24th, 2014 at 10:00 AM" bylines at the end
+    text = re.sub(
+        r'\s*By\s+\w+\s+posted\s+\w+\s+\d+.*$',
+        '', text, flags=re.IGNORECASE
+    ).rstrip()
+
+    # Strip "Home The Store BarstoolTV Cities..." nav text at the start
+    nav_match = re.match(
+        r'(Home\s+The Store\s+BarstoolTV\s+.*?Barstool Sports\s+All Categories\s+)',
+        text, re.IGNORECASE | re.DOTALL
+    )
+    if nav_match:
+        text = text[nav_match.end():].lstrip()
+
+    return text.strip()
+
+
 def get_display_html(post):
     """Get displayable HTML for a post."""
     body_html = post.get("body_html") or ""
@@ -233,8 +285,10 @@ def get_display_html(post):
         except Exception:
             pass
 
-    # Fallback: body_text to paragraphs
+    # Fallback: body_text to paragraphs (with junk stripped)
     body_text = post.get("body_text") or "No content available."
+    body_text = clean_body_text(body_text)
+
     # Try double newlines first, then single
     paragraphs = body_text.split('\n\n')
     if len(paragraphs) <= 1:
