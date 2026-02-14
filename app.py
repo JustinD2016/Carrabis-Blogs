@@ -118,11 +118,7 @@ st.markdown("""
         line-height: 1.8; color: #333;
     }
     .full-post .body img { max-width: 100%; height: auto; border-radius: 6px; margin: 10px 0; }
-    .full-post .body img[src=""], .full-post .body img:not([src]) { display: none; }
-    .full-post .body img.broken { display: none !important; }
-    .full-post .body iframe { max-width: 100%; margin: 10px 0; }
     .full-post .body p { margin-bottom: 1em; }
-    .full-post .body p:empty { display: none; }
     .full-post .body blockquote {
         border-left: 3px solid #ddd; padding-left: 1rem; margin: 1em 0; color: #555;
     }
@@ -277,7 +273,6 @@ def get_display_html(post):
 
     # nextjs_v2 body_html is already clean from __NEXT_DATA__
     if era == "nextjs_v2" and body_html:
-        body_html = strip_dead_media(body_html)
         return body_html
 
     # Other eras need sanitizing
@@ -285,7 +280,6 @@ def get_display_html(post):
         try:
             cleaned = sanitize_html(body_html)
             if cleaned:
-                cleaned = strip_dead_media(cleaned)
                 return cleaned
         except Exception:
             pass
@@ -299,37 +293,6 @@ def get_display_html(post):
     if len(paragraphs) <= 1:
         paragraphs = body_text.split('\n')
     return ''.join(f'<p>{html_lib.escape(p.strip())}</p>' for p in paragraphs if p.strip())
-
-
-def strip_dead_media(html_content):
-    """Remove img/iframe/embed tags pointing to dead or irrelevant domains,
-    and add onerror handlers to remaining images to hide if they fail to load."""
-    if not html_content:
-        return html_content
-
-    # Dead image/media domains — only truly dead sources
-    dead_patterns = [
-        r'<img[^>]+src="[^"]*chumley[^"]*"[^>]*/?>',
-        r'<img[^>]+src="[^"]*\.bss\.io[^"]*"[^>]*/?>',
-        r'<iframe[^>]+src="[^"]*vine\.co[^"]*"[^>]*></iframe>',
-        r'<embed[^>]+src="[^"]*"[^>]*/?>',
-    ]
-
-    for pattern in dead_patterns:
-        html_content = re.sub(pattern, '', html_content, flags=re.IGNORECASE)
-
-    # Add onerror to all remaining images so broken ones hide themselves
-    html_content = re.sub(
-        r'<img(?![^>]*onerror)',
-        '<img onerror="this.style.display=\'none\'"',
-        html_content,
-        flags=re.IGNORECASE
-    )
-
-    # Remove empty paragraphs left behind
-    html_content = re.sub(r'<p>\s*</p>', '', html_content)
-
-    return html_content
 
 
 # ============================================================================
