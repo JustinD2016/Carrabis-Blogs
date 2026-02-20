@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Carrabis Blog Archive — Streamlit App
+Carrabis Blog Archive â€” Streamlit App
 ======================================
 Usage (local):
     pip install streamlit beautifulsoup4
@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup, Comment
 # CONFIG
 # ============================================================================
 
-DB_PATH = Path("carrabis_archive") / "carrabis_blogs_deploy.db"
+DB_PATH = Path("carrabis_archive") / "carrabis_blogs.db"
 
 st.set_page_config(
     page_title="Carrabis Blog Archive",
@@ -215,80 +215,9 @@ def sanitize_html(raw_html):
     return result if len(result) > 50 else ""
 
 
-def clean_body_text(text):
-    """
-    Strip comments, sidebar tweets, footer junk from body_text.
-    Old wordpress-era posts have all of this baked into the text.
-    """
-    if not text:
-        return text
-
-    # Patterns that indicate end of article content
-    cut_patterns = [
-        r'\s+Share\s+Tweet\s+React\s*\(\d+\)',
-        r'\s+Share\s+Tweet\s*$',
-        r'Top \d+ Comments',
-        r'\d+ comments?\s+Sort by',
-        r'Comments will close out',
-        r'Thumbs Up\s+Thumbs Down\s+by\s+',
-        r'Up:\s*\d+\s*Down:\s*\d+',
-        r'Leave a Comment',
-        r'Tweets\s+.*?http://t\.co/',
-        r'Tour Dates\s+',
-        r'Featured Video\s+',
-        r'View more Videos',
-        r'Â©\s*\d{4}\s*Barstool',
-        r'Disclaimer\s*\|\s*Copyright',
-        r'Media Kit\s*$',
-        r'Barstool Sports\s*\|\s*Disclaimer',
-    ]
-
-    for pattern in cut_patterns:
-        match = re.search(pattern, text)
-        if match:
-            text = text[:match.start()].rstrip()
-            break
-
-    # Also strip "By carrabis posted November 24th, 2014 at 10:00 AM" bylines at the end
-    text = re.sub(
-        r'\s*By\s+\w+\s+posted\s+\w+\s+\d+.*$',
-        '', text, flags=re.IGNORECASE
-    ).rstrip()
-
-    # Strip "Home The Store BarstoolTV Cities..." nav text at the start
-    nav_match = re.match(
-        r'(Home\s+The Store\s+BarstoolTV\s+.*?Barstool Sports\s+All Categories\s+)',
-        text, re.IGNORECASE | re.DOTALL
-    )
-    if nav_match:
-        text = text[nav_match.end():].lstrip()
-
-    return text.strip()
-
-
 def get_display_html(post):
-    """Get displayable HTML for a post."""
-    body_html = post.get("body_html") or ""
-    era = post.get("era") or ""
-
-    # nextjs_v2 body_html is already clean from __NEXT_DATA__
-    if era == "nextjs_v2" and body_html:
-        return body_html
-
-    # Other eras need sanitizing
-    if body_html:
-        try:
-            cleaned = sanitize_html(body_html)
-            if cleaned:
-                return cleaned
-        except Exception:
-            pass
-
-    # Fallback: body_text to paragraphs (with junk stripped)
+    """Get displayable HTML for a post from body_text."""
     body_text = post.get("body_text") or "No content available."
-    body_text = clean_body_text(body_text)
-
-    # Try double newlines first, then single
     paragraphs = body_text.split('\n\n')
     if len(paragraphs) <= 1:
         paragraphs = body_text.split('\n')
@@ -319,7 +248,7 @@ def get_stats():
         "SELECT MIN(date_published), MAX(date_published) "
         "FROM posts WHERE author='Jared Carrabis' "
         "AND date_published IS NOT NULL "
-        "AND date_published >= '2010-01-01' AND date_published <= '2025-12-31'"
+        "AND date_published >= '2006-01-01' AND date_published <= '2025-12-31'"
     ).fetchone()
 
     by_conf = {}
@@ -331,8 +260,14 @@ def get_stats():
     dated = conn.execute(
         "SELECT COUNT(*) FROM posts WHERE author='Jared Carrabis' "
         "AND date_published IS NOT NULL "
-        "AND date_published >= '2010-01-01' AND date_published <= '2025-12-31'"
+        "AND date_published >= '2006-01-01' AND date_published <= '2025-12-31'"
     ).fetchone()[0]
+
+    by_source = {}
+    for r in conn.execute(
+        "SELECT source, COUNT(*) FROM posts WHERE author='Jared Carrabis' GROUP BY source"
+    ):
+        by_source[r[0] or "barstool"] = r[1]
 
     return {
         "total": total,
@@ -340,6 +275,7 @@ def get_stats():
         "min_date": row[0] or "?",
         "max_date": row[1] or "?",
         "by_conf": by_conf,
+        "by_source": by_source,
         "dated": dated,
         "undated": carrabis - dated,
     }
@@ -354,16 +290,23 @@ def _fts_escape(query):
 
 
 def search_posts(title_query="", body_query="", confidence="all",
-                 sort="Newest first", limit=50, offset=0):
+                 source="all", sort="Newest first", limit=50, offset=0):
     conn = get_db()
     using_fts = False
-    conf_vals = []
+    filter_vals = []
 
     # --- Build confidence filter ---
     conf_clause = ""
     if confidence != "all":
         conf_vals = [c.strip() for c in confidence.split(",")]
         conf_clause = f"AND p.confidence IN ({','.join('?' * len(conf_vals))})"
+        filter_vals.extend(conf_vals)
+
+    # --- Build source filter ---
+    source_clause = ""
+    if source != "all":
+        source_clause = "AND p.source = ?"
+        filter_vals.append(source)
 
     # --- Build FTS match ---
     fts_parts = []
@@ -377,12 +320,12 @@ def search_posts(title_query="", body_query="", confidence="all",
 
     # --- Relevance sort: join with FTS rank ---
     if sort == "Most relevant" and using_fts:
-        params = conf_vals + [fts_match]
+        params = filter_vals + [fts_match]
 
         total = conn.execute(f"""
             SELECT COUNT(*) FROM posts p
             JOIN posts_fts fts ON p.id = fts.rowid
-            WHERE p.author = 'Jared Carrabis' {conf_clause}
+            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
             AND posts_fts MATCH ?
         """, params).fetchone()[0]
 
@@ -391,7 +334,7 @@ def search_posts(title_query="", body_query="", confidence="all",
                    p.wayback_url, p.original_url, substr(p.body_text, 1, 300) as snippet
             FROM posts p
             JOIN posts_fts fts ON p.id = fts.rowid
-            WHERE p.author = 'Jared Carrabis' {conf_clause}
+            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
             AND posts_fts MATCH ?
             ORDER BY fts.rank
             LIMIT ? OFFSET ?
@@ -409,11 +352,11 @@ def search_posts(title_query="", body_query="", confidence="all",
     order = sort_map.get(sort, "p.date_published DESC")
 
     if using_fts:
-        params = conf_vals + [fts_match]
+        params = filter_vals + [fts_match]
         total = conn.execute(f"""
             SELECT COUNT(*) FROM posts p
             JOIN posts_fts fts ON p.id = fts.rowid
-            WHERE p.author = 'Jared Carrabis' {conf_clause}
+            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
             AND posts_fts MATCH ?
         """, params).fetchone()[0]
 
@@ -422,23 +365,23 @@ def search_posts(title_query="", body_query="", confidence="all",
                    p.wayback_url, p.original_url, substr(p.body_text, 1, 300) as snippet
             FROM posts p
             JOIN posts_fts fts ON p.id = fts.rowid
-            WHERE p.author = 'Jared Carrabis' {conf_clause}
+            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
             AND posts_fts MATCH ?
             ORDER BY {order}
             LIMIT ? OFFSET ?
         """, params + [limit, offset]).fetchall()
     else:
-        params = conf_vals
+        params = filter_vals
         total = conn.execute(f"""
             SELECT COUNT(*) FROM posts p
-            WHERE p.author = 'Jared Carrabis' {conf_clause}
+            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
         """, params).fetchone()[0]
 
         rows = conn.execute(f"""
             SELECT p.id, p.title, p.date_published, p.confidence, p.match_strategy,
                    p.wayback_url, p.original_url, substr(p.body_text, 1, 300) as snippet
             FROM posts p
-            WHERE p.author = 'Jared Carrabis' {conf_clause}
+            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
             ORDER BY {order}
             LIMIT ? OFFSET ?
         """, params + [limit, offset]).fetchall()
@@ -449,8 +392,8 @@ def search_posts(title_query="", body_query="", confidence="all",
 def get_post(post_id):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, title, author, date_published, body_html, body_text, "
-        "wayback_url, original_url, confidence, match_strategy, era "
+        "SELECT id, title, author, date_published, body_text, "
+        "wayback_url, original_url, confidence, match_strategy, era, source "
         "FROM posts WHERE id = ?",
         (post_id,),
     ).fetchone()
@@ -466,7 +409,7 @@ CONF_LABELS = {"high": "High", "medium": "Medium", "low": "Low", "none": "None"}
 
 
 def format_date(date_str):
-    if not date_str or date_str < "2010" or date_str > "2025":
+    if not date_str or date_str < "2006" or date_str > "2025":
         return "No date"
     return date_str
 
@@ -484,6 +427,9 @@ def render_header(stats):
 
 def render_stats(stats):
     conf = stats["by_conf"]
+    sources = stats.get("by_source", {})
+    # Count non-barstool sources
+    other_sources = sum(v for k, v in sources.items() if k != "barstool")
     st.markdown(f"""
     <div class="stat-row">
         <div class="stat-card">
@@ -491,12 +437,12 @@ def render_stats(stats):
             <div class="lbl">Carrabis Posts</div>
         </div>
         <div class="stat-card">
-            <div class="num">{conf.get('high', 0):,}</div>
-            <div class="lbl">High Confidence</div>
+            <div class="num">{sources.get('barstool', 0):,}</div>
+            <div class="lbl">Barstool</div>
         </div>
         <div class="stat-card">
-            <div class="num">{conf.get('medium', 0):,}</div>
-            <div class="lbl">Medium Confidence</div>
+            <div class="num">{other_sources:,}</div>
+            <div class="lbl">Pre-Barstool</div>
         </div>
         <div class="stat-card">
             <div class="num">{stats['dated']:,}</div>
@@ -534,7 +480,14 @@ def render_full_post(post):
     label = CONF_LABELS.get(conf, "?")
     wayback = post.get("wayback_url", "")
     original = post.get("original_url", "")
-    era = post.get("era", "unknown")
+    source = post.get("source", "barstool")
+    source_labels = {
+        "barstool": "Barstool Sports",
+        "soxspacenews": "SoxSpaceNews",
+        "soxspaceboston": "SoxSpaceBoston",
+        "sportsreelboston": "SportsReelBoston",
+    }
+    source_display = source_labels.get(source, source or "Unknown")
     body = get_display_html(post)
 
     st.markdown(f"""
@@ -543,7 +496,7 @@ def render_full_post(post):
         <div class="meta">
             Jared Carrabis &bull; {date} &bull;
             <span class="conf-dot" style="background:{color};"></span>{label} confidence &bull;
-            Era: {era}
+            {source_display}
             <br>
             <a href="{wayback}" target="_blank">View on Wayback Machine</a>
             &nbsp;|&nbsp;
@@ -603,11 +556,28 @@ def main():
             }.get(x, x),
         )
 
+        source_filter = st.selectbox(
+            "Source",
+            ["all", "barstool", "soxspacenews", "soxspaceboston", "sportsreelboston"],
+            format_func=lambda x: {
+                "all": "All Sources",
+                "barstool": "Barstool Sports",
+                "soxspacenews": "SoxSpaceNews",
+                "soxspaceboston": "SoxSpaceBoston",
+                "sportsreelboston": "SportsReelBoston",
+            }.get(x, x),
+        )
+
         per_page = st.select_slider("Posts per page", options=[25, 50, 100], value=50)
 
         st.markdown("---")
+        sources = stats.get("by_source", {})
+        source_lines = " | ".join(
+            f"**{v:,}** {k}" for k, v in sorted(sources.items()) if v > 0
+        )
         st.markdown(
             f"**{stats['carrabis']:,}** Carrabis posts\n\n"
+            f"{source_lines}\n\n"
             f"**{stats['dated']:,}** dated, **{stats['undated']:,}** undated\n\n"
             f"Range: {stats['min_date']} to {stats['max_date']}"
         )
@@ -630,7 +600,7 @@ def main():
     render_stats(stats)
 
     # Reset page on filter change
-    search_key = f"{title_search}|{body_search}|{confidence_filter}|{sort_order}"
+    search_key = f"{title_search}|{body_search}|{confidence_filter}|{source_filter}|{sort_order}"
     if "last_search_key" not in st.session_state:
         st.session_state.last_search_key = search_key
     if st.session_state.last_search_key != search_key:
@@ -644,6 +614,7 @@ def main():
         title_query=title_search,
         body_query=body_search,
         confidence=confidence_filter,
+        source=source_filter,
         sort=sort_order,
         limit=per_page,
         offset=offset,
