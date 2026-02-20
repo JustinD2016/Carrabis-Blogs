@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup, Comment
 # CONFIG
 # ============================================================================
 
-DB_PATH = Path("carrabis_archive") / "carrabis_blogs.db"
+DB_PATH = Path("carrabis_archive") / "carrabis_blogs_deploy.db"
 
 st.set_page_config(
     page_title="Carrabis Blog Archive",
