@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup, Comment
 # CONFIG
 # ============================================================================
 
-DB_PATH = Path("carrabis_archive") / "carrabis_blogs_deploy.db"
+DB_PATH = Path("carrabis_archive") / "carrabis_blogs.db"
 
 st.set_page_config(
     page_title="Carrabis Blog Archive",
@@ -528,8 +528,8 @@ def render_full_post(post):
 
 AUTHOR_TABS = [
     ("Jared Carrabis", "\u26be Carrabis"),
-    ("Coley Mick", "\ud83c\udfa4 Coley"),
-    ("Trill Withers", "\ud83c\udfb6 Trill"),
+    ("Coley Mick", "\U0001F3A4 Coley"),
+    ("Trill Withers", "\U0001F3B6 Trill"),
 ]
 
 
