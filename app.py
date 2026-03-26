@@ -131,6 +131,23 @@ st.markdown("""
     label, .stSelectbox label, .stTextInput label {
         color: #333 !important;
     }
+
+    /* Author tabs */
+    [data-testid="stTabs"] [data-baseweb="tab-list"] {
+        gap: 0;
+    }
+    [data-testid="stTabs"] [data-baseweb="tab"] {
+        font-family: 'Bitter', Georgia, serif;
+        font-size: 1.1rem;
+        font-weight: 600;
+        padding: 0.8rem 1.5rem;
+        white-space: nowrap;
+        min-width: fit-content;
+    }
+    [data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+        background-color: #0f3460;
+    }
+
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
