@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Create a minimal database for Streamlit Cloud deployment.
-Only Carrabis posts. Keeps body_html for eras with clean HTML
-(nextjs_v2, soxspacenews, soxspaceboston).
+Includes posts by Jared Carrabis, Coley Mick, and Trill Withers.
+Keeps body_html for eras with clean HTML (nextjs_v2, soxspacenews, soxspaceboston).
 For other eras, NULLs out body_html (app falls back to body_text).
 
 Usage:
@@ -17,6 +17,14 @@ DST = Path("carrabis_archive") / "carrabis_blogs_deploy.db"
 
 # Eras with clean article HTML worth keeping
 CLEAN_HTML_ERAS = {"nextjs_v2", "soxspacenews", "soxspaceboston"}
+
+# Authors to include (lowercase for matching, display name for normalization)
+INCLUDE_AUTHORS = {
+    "jared carrabis": "Jared Carrabis",
+    "coley mick": "Coley Mick",
+    "coley": "Coley Mick",       # normalize to "Coley Mick"
+    "trill withers": "Trill Withers",
+}
 
 
 def main():
@@ -53,19 +61,24 @@ def main():
                date_published, body_text, body_html, confidence,
                match_strategy, era, source
         FROM posts
-        WHERE author = 'Jared Carrabis'
+        WHERE lower(author) IN ('jared carrabis', 'coley mick', 'coley', 'trill withers')
     """).fetchall()
 
-    print(f"Copying {len(rows)} Carrabis posts...")
+    print(f"Copying {len(rows)} posts...")
 
     html_kept = 0
     text_only_count = 0
     source_counts = {}
+    author_counts = {}
     batch = []
 
     for r in rows:
         era = r["era"] or ""
         source = r["source"] or "barstool"
+
+        # Normalize author name
+        author_raw = (r["author"] or "").strip()
+        author = INCLUDE_AUTHORS.get(author_raw.lower(), author_raw)
 
         # Keep body_html for eras with clean article HTML
         if era in CLEAN_HTML_ERAS:
@@ -76,10 +89,11 @@ def main():
             text_only_count += 1
 
         source_counts[source] = source_counts.get(source, 0) + 1
+        author_counts[author] = author_counts.get(author, 0) + 1
 
         batch.append((
             r["id"], r["original_url"], r["wayback_url"], r["title"],
-            r["author"], r["date_published"], r["body_text"], html,
+            author, r["date_published"], r["body_text"], html,
             r["confidence"], r["match_strategy"], era, source
         ))
 
@@ -88,6 +102,9 @@ def main():
 
     print(f"  {html_kept} with body_html ({', '.join(CLEAN_HTML_ERAS)})")
     print(f"  {text_only_count} with body_text only")
+    print(f"  By author:")
+    for a, c in sorted(author_counts.items()):
+        print(f"    {a}: {c}")
     print(f"  By source:")
     for s, c in sorted(source_counts.items()):
         print(f"    {s}: {c}")

@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup, Comment
 # CONFIG
 # ============================================================================
 
-DB_PATH = Path("carrabis_archive") / "carrabis_blogs_deploy.db"
+DB_PATH = Path("carrabis_archive") / "carrabis_blogs.db"
 
 st.set_page_config(
     page_title="Carrabis Blog Archive",
@@ -236,49 +236,64 @@ def get_db():
 
 
 @st.cache_data(ttl=600)
-def get_stats():
+def get_stats(author="Jared Carrabis"):
     conn = get_db()
     total = conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
-    carrabis = conn.execute(
-        "SELECT COUNT(*) FROM posts WHERE author='Jared Carrabis'"
+    author_count = conn.execute(
+        "SELECT COUNT(*) FROM posts WHERE author=?", (author,)
     ).fetchone()[0]
 
     # Only valid dates
     row = conn.execute(
         "SELECT MIN(date_published), MAX(date_published) "
-        "FROM posts WHERE author='Jared Carrabis' "
+        "FROM posts WHERE author=? "
         "AND date_published IS NOT NULL "
-        "AND date_published >= '2006-01-01' AND date_published <= '2025-12-31'"
+        "AND date_published >= '2006-01-01' AND date_published <= '2025-12-31'",
+        (author,),
     ).fetchone()
 
     by_conf = {}
     for r in conn.execute(
-        "SELECT confidence, COUNT(*) FROM posts WHERE author='Jared Carrabis' GROUP BY confidence"
+        "SELECT confidence, COUNT(*) FROM posts WHERE author=? GROUP BY confidence",
+        (author,),
     ):
         by_conf[r[0] or "none"] = r[1]
 
     dated = conn.execute(
-        "SELECT COUNT(*) FROM posts WHERE author='Jared Carrabis' "
+        "SELECT COUNT(*) FROM posts WHERE author=? "
         "AND date_published IS NOT NULL "
-        "AND date_published >= '2006-01-01' AND date_published <= '2025-12-31'"
+        "AND date_published >= '2006-01-01' AND date_published <= '2025-12-31'",
+        (author,),
     ).fetchone()[0]
 
     by_source = {}
     for r in conn.execute(
-        "SELECT source, COUNT(*) FROM posts WHERE author='Jared Carrabis' GROUP BY source"
+        "SELECT source, COUNT(*) FROM posts WHERE author=? GROUP BY source",
+        (author,),
     ):
         by_source[r[0] or "barstool"] = r[1]
 
     return {
         "total": total,
-        "carrabis": carrabis,
+        "author": author,
+        "author_count": author_count,
         "min_date": row[0] or "?",
         "max_date": row[1] or "?",
         "by_conf": by_conf,
         "by_source": by_source,
         "dated": dated,
-        "undated": carrabis - dated,
+        "undated": author_count - dated,
     }
+
+
+@st.cache_data(ttl=600)
+def get_author_counts():
+    """Get post counts for each author in the database."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT author, COUNT(*) as cnt FROM posts GROUP BY author ORDER BY cnt DESC"
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
 
 
 def _fts_escape(query):
@@ -289,11 +304,12 @@ def _fts_escape(query):
     return " ".join(f'"{w}"' for w in words if w)
 
 
-def search_posts(title_query="", body_query="", confidence="all",
-                 source="all", sort="Newest first", limit=50, offset=0):
+def search_posts(author="Jared Carrabis", title_query="", body_query="",
+                 confidence="all", source="all", sort="Newest first",
+                 limit=50, offset=0):
     conn = get_db()
     using_fts = False
-    filter_vals = []
+    filter_vals = [author]  # author is always first param
 
     # --- Build confidence filter ---
     conf_clause = ""
@@ -325,7 +341,7 @@ def search_posts(title_query="", body_query="", confidence="all",
         total = conn.execute(f"""
             SELECT COUNT(*) FROM posts p
             JOIN posts_fts fts ON p.id = fts.rowid
-            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
+            WHERE p.author = ? {conf_clause} {source_clause}
             AND posts_fts MATCH ?
         """, params).fetchone()[0]
 
@@ -334,7 +350,7 @@ def search_posts(title_query="", body_query="", confidence="all",
                    p.wayback_url, p.original_url, substr(p.body_text, 1, 300) as snippet
             FROM posts p
             JOIN posts_fts fts ON p.id = fts.rowid
-            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
+            WHERE p.author = ? {conf_clause} {source_clause}
             AND posts_fts MATCH ?
             ORDER BY fts.rank
             LIMIT ? OFFSET ?
@@ -356,7 +372,7 @@ def search_posts(title_query="", body_query="", confidence="all",
         total = conn.execute(f"""
             SELECT COUNT(*) FROM posts p
             JOIN posts_fts fts ON p.id = fts.rowid
-            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
+            WHERE p.author = ? {conf_clause} {source_clause}
             AND posts_fts MATCH ?
         """, params).fetchone()[0]
 
@@ -365,7 +381,7 @@ def search_posts(title_query="", body_query="", confidence="all",
                    p.wayback_url, p.original_url, substr(p.body_text, 1, 300) as snippet
             FROM posts p
             JOIN posts_fts fts ON p.id = fts.rowid
-            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
+            WHERE p.author = ? {conf_clause} {source_clause}
             AND posts_fts MATCH ?
             ORDER BY {order}
             LIMIT ? OFFSET ?
@@ -374,14 +390,14 @@ def search_posts(title_query="", body_query="", confidence="all",
         params = filter_vals
         total = conn.execute(f"""
             SELECT COUNT(*) FROM posts p
-            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
+            WHERE p.author = ? {conf_clause} {source_clause}
         """, params).fetchone()[0]
 
         rows = conn.execute(f"""
             SELECT p.id, p.title, p.date_published, p.confidence, p.match_strategy,
                    p.wayback_url, p.original_url, substr(p.body_text, 1, 300) as snippet
             FROM posts p
-            WHERE p.author = 'Jared Carrabis' {conf_clause} {source_clause}
+            WHERE p.author = ? {conf_clause} {source_clause}
             ORDER BY {order}
             LIMIT ? OFFSET ?
         """, params + [limit, offset]).fetchall()
@@ -415,10 +431,11 @@ def format_date(date_str):
 
 
 def render_header(stats):
+    author = stats.get("author", "Jared Carrabis")
     st.markdown(f"""
     <div class="archive-header">
-        <h1>\u26be Carrabis Blog Archive</h1>
-        <p class="sub">{stats['carrabis']:,} posts recovered from the Wayback Machine
+        <h1>\u26be {html_lib.escape(author)} Blog Archive</h1>
+        <p class="sub">{stats['author_count']:,} posts recovered from the Wayback Machine
         &bull; {stats['min_date']} to {stats['max_date']}
         &bull; {stats['undated']:,} undated</p>
     </div>
@@ -426,15 +443,13 @@ def render_header(stats):
 
 
 def render_stats(stats):
-    conf = stats["by_conf"]
     sources = stats.get("by_source", {})
-    # Count non-barstool sources
     other_sources = sum(v for k, v in sources.items() if k != "barstool")
     st.markdown(f"""
     <div class="stat-row">
         <div class="stat-card">
-            <div class="num">{stats['carrabis']:,}</div>
-            <div class="lbl">Carrabis Posts</div>
+            <div class="num">{stats['author_count']:,}</div>
+            <div class="lbl">Total Posts</div>
         </div>
         <div class="stat-card">
             <div class="num">{sources.get('barstool', 0):,}</div>
@@ -494,7 +509,7 @@ def render_full_post(post):
     <div class="full-post">
         <h1>{title}</h1>
         <div class="meta">
-            Jared Carrabis &bull; {date} &bull;
+            {html_lib.escape(post.get('author', 'Unknown'))} &bull; {date} &bull;
             <span class="conf-dot" style="background:{color};"></span>{label} confidence &bull;
             {source_display}
             <br>
@@ -511,17 +526,49 @@ def render_full_post(post):
 # MAIN
 # ============================================================================
 
+AUTHOR_TABS = [
+    ("Jared Carrabis", "\u26be Carrabis"),
+    ("Coley Mick", "\ud83c\udfa4 Coley"),
+    ("Trill Withers", "\ud83c\udfb6 Trill"),
+]
+
+
 def main():
     if not DB_PATH.exists():
         st.error(f"Database not found at `{DB_PATH}`. Run the scraper first.")
         return
 
-    stats = get_stats()
-
     if "viewing_post" not in st.session_state:
         st.session_state.viewing_post = None
     if "page" not in st.session_state:
         st.session_state.page = 0
+
+    # --- Author tabs ---
+    author_counts = get_author_counts()
+    tab_labels = [
+        f"{label} ({author_counts.get(name, 0):,})"
+        for name, label in AUTHOR_TABS
+        if author_counts.get(name, 0) > 0
+    ]
+    tab_authors = [
+        name for name, label in AUTHOR_TABS
+        if author_counts.get(name, 0) > 0
+    ]
+
+    if not tab_labels:
+        st.error("No posts found in database.")
+        return
+
+    tabs = st.tabs(tab_labels)
+
+    for tab, current_author in zip(tabs, tab_authors):
+        with tab:
+            _render_author_view(current_author)
+
+
+def _render_author_view(current_author):
+    """Render the full browse/search view for one author."""
+    stats = get_stats(current_author)
 
     # --- Sidebar ---
     with st.sidebar:
@@ -531,11 +578,13 @@ def main():
             "Title search",
             placeholder="e.g. red sox mookie",
             help="Search post titles. Use quotes for exact phrases.",
+            key=f"title_{current_author}",
         )
         body_search = st.text_input(
             "Body search",
             placeholder="e.g. spring training",
             help="Search post body text. Use quotes for exact phrases.",
+            key=f"body_{current_author}",
         )
 
         st.markdown("### Filters")
@@ -545,7 +594,7 @@ def main():
         if has_search:
             sort_options.insert(0, "Most relevant")
 
-        sort_order = st.selectbox("Sort by", sort_options)
+        sort_order = st.selectbox("Sort by", sort_options, key=f"sort_{current_author}")
 
         confidence_filter = st.selectbox(
             "Confidence",
@@ -554,6 +603,7 @@ def main():
                 "all": "All", "high": "High only", "high,medium": "High + Medium",
                 "medium": "Medium only", "low": "Low only", "none": "None only",
             }.get(x, x),
+            key=f"conf_{current_author}",
         )
 
         source_filter = st.selectbox(
@@ -566,9 +616,13 @@ def main():
                 "soxspaceboston": "SoxSpaceBoston",
                 "sportsreelboston": "SportsReelBoston",
             }.get(x, x),
+            key=f"source_{current_author}",
         )
 
-        per_page = st.select_slider("Posts per page", options=[25, 50, 100], value=50)
+        per_page = st.select_slider(
+            "Posts per page", options=[25, 50, 100], value=50,
+            key=f"perpage_{current_author}",
+        )
 
         st.markdown("---")
         sources = stats.get("by_source", {})
@@ -576,7 +630,7 @@ def main():
             f"**{v:,}** {k}" for k, v in sorted(sources.items()) if v > 0
         )
         st.markdown(
-            f"**{stats['carrabis']:,}** Carrabis posts\n\n"
+            f"**{stats['author_count']:,}** {current_author} posts\n\n"
             f"{source_lines}\n\n"
             f"**{stats['dated']:,}** dated, **{stats['undated']:,}** undated\n\n"
             f"Range: {stats['min_date']} to {stats['max_date']}"
@@ -585,7 +639,8 @@ def main():
     # --- Single post view ---
     if st.session_state.viewing_post is not None:
         render_header(stats)
-        if st.button("\u2190 Back to results", type="primary"):
+        if st.button("\u2190 Back to results", type="primary",
+                     key=f"back_{current_author}"):
             st.session_state.viewing_post = None
             st.rerun()
         post = get_post(st.session_state.viewing_post)
@@ -600,7 +655,10 @@ def main():
     render_stats(stats)
 
     # Reset page on filter change
-    search_key = f"{title_search}|{body_search}|{confidence_filter}|{source_filter}|{sort_order}"
+    search_key = (
+        f"{current_author}|{title_search}|{body_search}|"
+        f"{confidence_filter}|{source_filter}|{sort_order}"
+    )
     if "last_search_key" not in st.session_state:
         st.session_state.last_search_key = search_key
     if st.session_state.last_search_key != search_key:
@@ -611,6 +669,7 @@ def main():
     offset = page * per_page
 
     total, posts = search_posts(
+        author=current_author,
         title_query=title_search,
         body_query=body_search,
         confidence=confidence_filter,
@@ -651,7 +710,7 @@ def main():
             render_post_card(post)
         with col2:
             st.write("")
-            if st.button("Read", key=f"read_{post['id']}"):
+            if st.button("Read", key=f"read_{current_author}_{post['id']}"):
                 st.session_state.viewing_post = post["id"]
                 st.rerun()
 
@@ -659,7 +718,7 @@ def main():
     st.markdown("---")
     col_prev, col_info, col_next = st.columns([1, 2, 1])
     with col_prev:
-        if page > 0 and st.button("\u2190 Previous"):
+        if page > 0 and st.button("\u2190 Previous", key=f"prev_{current_author}"):
             st.session_state.page = page - 1
             st.rerun()
     with col_info:
@@ -669,7 +728,8 @@ def main():
             unsafe_allow_html=True,
         )
     with col_next:
-        if page < total_pages - 1 and st.button("Next \u2192"):
+        if page < total_pages - 1 and st.button("Next \u2192",
+                                                  key=f"next_{current_author}"):
             st.session_state.page = page + 1
             st.rerun()
 
