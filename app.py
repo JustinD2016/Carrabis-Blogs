@@ -135,17 +135,27 @@ st.markdown("""
     /* Author tabs */
     [data-testid="stTabs"] [data-baseweb="tab-list"] {
         gap: 0;
+        background-color: white;
+        border-radius: 10px 10px 0 0;
+        border: 1px solid #e8e6e1;
+        border-bottom: none;
+        padding: 0.3rem 0.5rem 0;
     }
     [data-testid="stTabs"] [data-baseweb="tab"] {
         font-family: 'Bitter', Georgia, serif;
         font-size: 1.1rem;
         font-weight: 600;
-        padding: 0.8rem 1.5rem;
+        padding: 0.8rem 2rem;
         white-space: nowrap;
-        min-width: fit-content;
+        min-width: 150px;
+        justify-content: center;
+        color: #1a1a2e;
     }
     [data-testid="stTabs"] [data-baseweb="tab-highlight"] {
         background-color: #0f3460;
+    }
+    [data-testid="stTabs"] [data-baseweb="tab-border"] {
+        display: none;
     }
 
     #MainMenu {visibility: hidden;}
@@ -576,32 +586,40 @@ def main():
         st.error("No posts found in database.")
         return
 
+    # Track which tab is selected
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = 0
+
     tabs = st.tabs(tab_labels)
 
-    for tab, current_author in zip(tabs, tab_authors):
+    for i, (tab, current_author) in enumerate(zip(tabs, tab_authors)):
         with tab:
-            _render_author_view(current_author)
+            # Detect tab switch and reset page
+            if st.session_state.active_tab != i:
+                st.session_state.active_tab = i
+                st.session_state.page = 0
+                st.session_state.viewing_post = None
+
+            _render_author_content(current_author)
 
 
-def _render_author_view(current_author):
-    """Render the full browse/search view for one author."""
+def _render_author_content(current_author):
+    """Render the browse/search content for one author tab."""
     stats = get_stats(current_author)
 
-    # --- Sidebar ---
+    # --- Sidebar (shared, but reads from current author context) ---
     with st.sidebar:
-        st.markdown("### Search")
+        st.markdown(f"### Search {current_author.split()[0]}'s Posts")
 
         title_search = st.text_input(
             "Title search",
             placeholder="e.g. red sox mookie",
             help="Search post titles. Use quotes for exact phrases.",
-            key=f"title_{current_author}",
         )
         body_search = st.text_input(
             "Body search",
             placeholder="e.g. spring training",
             help="Search post body text. Use quotes for exact phrases.",
-            key=f"body_{current_author}",
         )
 
         st.markdown("### Filters")
@@ -611,7 +629,7 @@ def _render_author_view(current_author):
         if has_search:
             sort_options.insert(0, "Most relevant")
 
-        sort_order = st.selectbox("Sort by", sort_options, key=f"sort_{current_author}")
+        sort_order = st.selectbox("Sort by", sort_options)
 
         confidence_filter = st.selectbox(
             "Confidence",
@@ -620,26 +638,23 @@ def _render_author_view(current_author):
                 "all": "All", "high": "High only", "high,medium": "High + Medium",
                 "medium": "Medium only", "low": "Low only", "none": "None only",
             }.get(x, x),
-            key=f"conf_{current_author}",
         )
 
-        source_filter = st.selectbox(
-            "Source",
-            ["all", "barstool", "soxspacenews", "soxspaceboston", "sportsreelboston"],
-            format_func=lambda x: {
-                "all": "All Sources",
-                "barstool": "Barstool Sports",
-                "soxspacenews": "SoxSpaceNews",
-                "soxspaceboston": "SoxSpaceBoston",
-                "sportsreelboston": "SportsReelBoston",
-            }.get(x, x),
-            key=f"source_{current_author}",
-        )
+        # Only show source filter for Carrabis (others are barstool-only)
+        source_filter = "all"
+        if current_author == "Jared Carrabis":
+            source_filter = st.selectbox(
+                "Source",
+                ["all", "barstool", "soxspacenews", "soxspaceboston"],
+                format_func=lambda x: {
+                    "all": "All Sources",
+                    "barstool": "Barstool Sports",
+                    "soxspacenews": "SoxSpaceNews",
+                    "soxspaceboston": "SoxSpaceBoston",
+                }.get(x, x),
+            )
 
-        per_page = st.select_slider(
-            "Posts per page", options=[25, 50, 100], value=50,
-            key=f"perpage_{current_author}",
-        )
+        per_page = st.select_slider("Posts per page", options=[25, 50, 100], value=50)
 
         st.markdown("---")
         sources = stats.get("by_source", {})
@@ -656,8 +671,7 @@ def _render_author_view(current_author):
     # --- Single post view ---
     if st.session_state.viewing_post is not None:
         render_header(stats)
-        if st.button("\u2190 Back to results", type="primary",
-                     key=f"back_{current_author}"):
+        if st.button("\u2190 Back to results", type="primary"):
             st.session_state.viewing_post = None
             st.rerun()
         post = get_post(st.session_state.viewing_post)
@@ -727,7 +741,7 @@ def _render_author_view(current_author):
             render_post_card(post)
         with col2:
             st.write("")
-            if st.button("Read", key=f"read_{current_author}_{post['id']}"):
+            if st.button("Read", key=f"read_{post['id']}"):
                 st.session_state.viewing_post = post["id"]
                 st.rerun()
 
@@ -735,7 +749,7 @@ def _render_author_view(current_author):
     st.markdown("---")
     col_prev, col_info, col_next = st.columns([1, 2, 1])
     with col_prev:
-        if page > 0 and st.button("\u2190 Previous", key=f"prev_{current_author}"):
+        if page > 0 and st.button("\u2190 Previous"):
             st.session_state.page = page - 1
             st.rerun()
     with col_info:
@@ -745,8 +759,7 @@ def _render_author_view(current_author):
             unsafe_allow_html=True,
         )
     with col_next:
-        if page < total_pages - 1 and st.button("Next \u2192",
-                                                  key=f"next_{current_author}"):
+        if page < total_pages - 1 and st.button("Next \u2192"):
             st.session_state.page = page + 1
             st.rerun()
 
