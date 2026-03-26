@@ -570,7 +570,7 @@ def main():
     if "page" not in st.session_state:
         st.session_state.page = 0
 
-    # --- Author tabs ---
+    # --- Author tabs setup ---
     author_counts = get_author_counts()
     tab_labels = [
         f"{label} ({author_counts.get(name, 0):,})"
@@ -586,30 +586,9 @@ def main():
         st.error("No posts found in database.")
         return
 
-    # Track which tab is selected
-    if "active_tab" not in st.session_state:
-        st.session_state.active_tab = 0
-
-    tabs = st.tabs(tab_labels)
-
-    for i, (tab, current_author) in enumerate(zip(tabs, tab_authors)):
-        with tab:
-            # Detect tab switch and reset page
-            if st.session_state.active_tab != i:
-                st.session_state.active_tab = i
-                st.session_state.page = 0
-                st.session_state.viewing_post = None
-
-            _render_author_content(current_author)
-
-
-def _render_author_content(current_author):
-    """Render the browse/search content for one author tab."""
-    stats = get_stats(current_author)
-
-    # --- Sidebar (shared, but reads from current author context) ---
+    # --- Sidebar (rendered once, shared across tabs) ---
     with st.sidebar:
-        st.markdown(f"### Search {current_author.split()[0]}'s Posts")
+        st.markdown("### Search")
 
         title_search = st.text_input(
             "Title search",
@@ -640,38 +619,52 @@ def _render_author_content(current_author):
             }.get(x, x),
         )
 
-        # Only show source filter for Carrabis (others are barstool-only)
-        source_filter = "all"
-        if current_author == "Jared Carrabis":
-            source_filter = st.selectbox(
-                "Source",
-                ["all", "barstool", "soxspacenews", "soxspaceboston"],
-                format_func=lambda x: {
-                    "all": "All Sources",
-                    "barstool": "Barstool Sports",
-                    "soxspacenews": "SoxSpaceNews",
-                    "soxspaceboston": "SoxSpaceBoston",
-                }.get(x, x),
-            )
+        source_filter = st.selectbox(
+            "Source",
+            ["all", "barstool", "soxspacenews", "soxspaceboston"],
+            format_func=lambda x: {
+                "all": "All Sources",
+                "barstool": "Barstool Sports",
+                "soxspacenews": "SoxSpaceNews",
+                "soxspaceboston": "SoxSpaceBoston",
+            }.get(x, x),
+        )
 
         per_page = st.select_slider("Posts per page", options=[25, 50, 100], value=50)
 
-        st.markdown("---")
-        sources = stats.get("by_source", {})
-        source_lines = " | ".join(
-            f"**{v:,}** {k}" for k, v in sorted(sources.items()) if v > 0
-        )
-        st.markdown(
-            f"**{stats['author_count']:,}** {current_author} posts\n\n"
-            f"{source_lines}\n\n"
-            f"**{stats['dated']:,}** dated, **{stats['undated']:,}** undated\n\n"
-            f"Range: {stats['min_date']} to {stats['max_date']}"
-        )
+    # --- Tabs ---
+    tabs = st.tabs(tab_labels)
+
+    filters = {
+        "title_search": title_search,
+        "body_search": body_search,
+        "sort_order": sort_order,
+        "confidence_filter": confidence_filter,
+        "source_filter": source_filter,
+        "per_page": per_page,
+    }
+
+    for i, (tab, current_author) in enumerate(zip(tabs, tab_authors)):
+        with tab:
+            _render_author_content(current_author, filters)
+
+
+def _render_author_content(current_author, filters):
+    """Render the browse/search content for one author tab."""
+    stats = get_stats(current_author)
+
+    title_search = filters["title_search"]
+    body_search = filters["body_search"]
+    sort_order = filters["sort_order"]
+    confidence_filter = filters["confidence_filter"]
+    source_filter = filters["source_filter"]
+    per_page = filters["per_page"]
 
     # --- Single post view ---
     if st.session_state.viewing_post is not None:
         render_header(stats)
-        if st.button("\u2190 Back to results", type="primary"):
+        if st.button("\u2190 Back to results", type="primary",
+                     key=f"back_{current_author}"):
             st.session_state.viewing_post = None
             st.rerun()
         post = get_post(st.session_state.viewing_post)
@@ -741,7 +734,7 @@ def _render_author_content(current_author):
             render_post_card(post)
         with col2:
             st.write("")
-            if st.button("Read", key=f"read_{post['id']}"):
+            if st.button("Read", key=f"read_{current_author}_{post['id']}"):
                 st.session_state.viewing_post = post["id"]
                 st.rerun()
 
@@ -749,7 +742,8 @@ def _render_author_content(current_author):
     st.markdown("---")
     col_prev, col_info, col_next = st.columns([1, 2, 1])
     with col_prev:
-        if page > 0 and st.button("\u2190 Previous"):
+        if page > 0 and st.button("\u2190 Previous",
+                                   key=f"prev_{current_author}"):
             st.session_state.page = page - 1
             st.rerun()
     with col_info:
@@ -759,7 +753,8 @@ def _render_author_content(current_author):
             unsafe_allow_html=True,
         )
     with col_next:
-        if page < total_pages - 1 and st.button("Next \u2192"):
+        if page < total_pages - 1 and st.button("Next \u2192",
+                                                  key=f"next_{current_author}"):
             st.session_state.page = page + 1
             st.rerun()
 
